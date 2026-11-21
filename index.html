@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>ESL Hành trình</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<style>
+  :root { --bg:#14161a; --card:#1d2026; --line:#2c3038; --fg:#e9ecf1; --mut:#9aa3ae; --acc:#e5484d; --ok:#30a46c; --blue:#3b82f6; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui,-apple-system,Roboto,"Segoe UI",sans-serif; }
+  #map { height:42vh; min-height:230px; width:100%; background:#22252b; }
+  .wrap { padding:10px 12px 40px; max-width:640px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin:10px 0; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:0; }
+  input,select,button { font:inherit; color:var(--fg); }
+  input[type=text],input[type=number],select { background:#111317; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  input[type=text] { width:100%; }
+  input[type=number] { width:90px; }
+  button { background:#2a2e36; border:1px solid var(--line); border-radius:10px; padding:10px 12px; cursor:pointer; }
+  button:disabled { opacity:.45; }
+  button.pri { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; }
+  button.ok { background:var(--ok); border-color:var(--ok); color:#fff; font-weight:600; }
+  .btns { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .btns button { padding:12px 6px; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; font-size:13px; }
+  .chip { padding:3px 9px; border-radius:99px; background:#262a31; color:var(--mut); }
+  .chip.on { background:#163b2a; color:#7ee2a8; }
+  .chip.warn { background:#3d1d1f; color:#ff9b9e; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .stat { background:#15171b; border-radius:8px; padding:6px 8px; }
+  .stat b { display:block; font-size:20px; }
+  .stat span { color:var(--mut); font-size:12px; }
+  .mut { color:var(--mut); font-size:13px; }
+  #results { list-style:none; margin:6px 0 0; padding:0; max-height:200px; overflow:auto; }
+  #results li { padding:8px 6px; border-bottom:1px solid var(--line); cursor:pointer; font-size:14px; }
+  #results li:hover { background:#262a31; }
+  #pv { width:100%; max-width:500px; image-rendering:pixelated; image-rendering:crisp-edges; border-radius:6px; background:#fff; display:block; margin:6px auto 0; }
+  details > summary { cursor:pointer; padding:4px 0; font-weight:600; }
+  .set { display:grid; grid-template-columns:1fr auto; gap:8px 10px; align-items:center; margin-top:8px; font-size:14px; }
+  .set label { color:var(--fg); }
+  .set small { display:block; color:var(--mut); font-size:12px; }
+  #log { font:12px/1.35 ui-monospace,Menlo,Consolas,monospace; max-height:220px; overflow:auto; white-space:pre-wrap; color:#b9c0ca; margin-top:6px; }
+  .banner { background:#3d1d1f; color:#ffc9cb; border-radius:10px; padding:8px 12px; margin:10px 0; font-size:14px; display:none; }
+  .banner.info { background:#1a2c45; color:#bcd6ff; }
+  .leaflet-popup-content button { background:var(--acc); color:#fff; border:0; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="wrap">
+  <div id="bannerSupport" class="banner"></div>
+  <div id="bannerResume" class="banner info"></div>
+
+  <div class="card">
+    <div class="row">
+      <input id="q" type="text" class="grow" placeholder="Tìm điểm đến (vd: Hồ Gươm, Hà Nội)… hoặc chạm lên bản đồ" enterkeyhint="search">
+      <button id="btnSearch">Tìm</button>
+    </div>
+    <ul id="results"></ul>
+    <div class="row" style="margin-top:8px">
+      <div class="grow">
+        <div><b>Điểm đến:</b> <span id="destName" class="mut">chưa chọn</span></div>
+        <div id="routeInfo" class="mut"></div>
+      </div>
+      <select id="profile" title="Phương tiện">
+        <option value="car">Xe máy / ô tô</option>
+        <option value="bike">Xe đạp</option>
+        <option value="foot">Đi bộ</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="chips">
+    <span id="chipBle" class="chip">Nhãn: chưa kết nối</span>
+    <span id="chipGps" class="chip">GPS: đang chờ</span>
+    <span id="chipNext" class="chip">—</span>
+  </div>
+
+  <div class="card">
+    <div class="btns">
+      <button id="btnBle">Kết nối nhãn</button>
+      <button id="btnTrip" class="pri">Bắt đầu</button>
+      <button id="btnSend">Gửi ngay</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stats">
+      <div class="stat"><span>Đã đi</span><b id="sTrav">--</b></div>
+      <div class="stat"><span>Còn lại</span><b id="sRem">--</b></div>
+      <div class="stat"><span>TB (km/h)</span><b id="sAvg">--</b></div>
+      <div class="stat"><span>Hiện tại (km/h)</span><b id="sNow">--</b></div>
+      <div class="stat"><span>Thời gian</span><b id="sEl">--</b></div>
+      <div class="stat"><span>Dự kiến đến</span><b id="sEta">--</b></div>
+    </div>
+    <div id="wxLine" class="mut" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><b class="grow">Xem trước trên nhãn</b><span id="pvInfo" class="mut"></span></div>
+    <canvas id="pv" width="250" height="128"></canvas>
+    <div class="mut" style="margin-top:4px">Vùng gạch chéo là phần màn không hiển thị.</div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Cài đặt</summary>
+      <div class="set">
+        <label>Chu kỳ gửi (phút)</label><input id="intervalMin" type="number" min="1" max="60" step="1">
+        <label>Giữ kết nối Bluetooth giữa các lần gửi<small>Tắt để tiết kiệm pin nhãn (mỗi lần gửi sẽ kết nối lại)</small></label><input id="keepConnected" type="checkbox">
+        <label>Khi đến nơi</label>
+        <select id="arriveAction">
+          <option value="summary">Hiện ảnh tổng kết</option>
+          <option value="clock">Chuyển nhãn về chế độ đồng hồ</option>
+          <option value="calendar">Chuyển nhãn về chế độ lịch</option>
+        </select>
+        <label>Màu màn hình</label>
+        <select id="colorMode"><option value="bwr">Đen / trắng / đỏ</option><option value="bw">Chỉ đen trắng</option></select>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Căn chỉnh màn hình</summary>
+      <div class="mut" style="margin-top:6px">Gửi ảnh mẫu, nhìn lên nhãn rồi chỉnh tới khi chữ “TRÊN” nằm phía trên và đọc xuôi. Nếu thấy dải đen ở mép trên nhưng mất dải đỏ ở mép dưới thì để “Lề trên” = 0; ngược lại đặt 6.</div>
+      <div class="set">
+        <label>Định dạng bộ nhớ ảnh</label>
+        <select id="memLayout">
+          <option value="land">Ngang 250×128 (không xoay)</option>
+          <option value="cw">Dọc 128×250, xoay phải</option>
+          <option value="ccw">Dọc 128×250, xoay trái</option>
+        </select>
+        <label>Lật 180°<small>Khi gắn nhãn ngược</small></label><input id="flip" type="checkbox">
+        <label>Lề trên (px)<small>0–6, dời nội dung khỏi 6 hàng bị che</small></label><input id="topOffset" type="number" min="0" max="6" step="1">
+        <label>Đảo bit lớp đỏ<small>Bật nếu cả màn bị đỏ</small></label><input id="invertRed" type="checkbox">
+        <label>Ngưỡng đen/trắng</label><input id="bwThreshold" type="number" min="60" max="220" step="5">
+        <label>MTU thủ công<small>0 = theo nhãn báo về</small></label><input id="mtuOverride" type="number" min="0" max="512" step="1">
+        <label>Số gói không chờ phản hồi</label><input id="interleave" type="number" min="0" max="500" step="1">
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="btnTest">Gửi ảnh mẫu căn chỉnh</button>
+        <button id="btnClock">Về đồng hồ</button>
+        <button id="btnCal">Về lịch</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Mô phỏng (thử ở nhà)</summary>
+      <div class="set">
+        <label>Giả lập di chuyển theo tuyến<small>Bỏ qua GPS thật khi đang chạy chuyến</small></label><input id="sim" type="checkbox">
+        <label>Tốc độ giả lập (km/h)</label><input id="simSpeed" type="number" min="1" max="200" step="1">
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Nhật ký</summary>
+      <div id="log"></div>
+    </details>
+  </div>
+
+  <div class="mut" style="text-align:center;margin-top:14px">Bản đồ © OpenStreetMap · Tuyến đường OSRM/FOSSGIS · Thời tiết Open-Meteo</div>
+</div>
+
+<script>
+'use strict';
+/* ====================================================================
+ *  ESL Hành trình — gửi thông tin chuyến đi lên nhãn giá e-ink 2.13"
+ *  chạy firmware EPD-nRF5 (nRF52811) qua Web Bluetooth.
+ * ==================================================================== */
+
+const $ = (id) => document.getElementById(id);
+const pad = (n) => String(n).padStart(2, '0');
+const hhmm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ----- Màn hình -----
+const W = 250, H = 128, VIS_H = 122;     // bộ nhớ 250×128, nhìn thấy 122 hàng
+const FF = 'Roboto, "Noto Sans", "Segoe UI", Arial, sans-serif';
+
+// ----- Cài đặt -----
+const LS_SET = 'eslTrip.settings.v1', LS_TRIP = 'eslTrip.trip.v1', LS_POS = 'eslTrip.lastPos';
+const DEFAULTS = {
+  intervalMin: 5, profile: 'car', keepConnected: true, arriveAction: 'summary', colorMode: 'bwr',
+  memLayout: 'land', flip: false, topOffset: 0, invertRed: false, bwThreshold: 140,
+  mtuOverride: 0, interleave: 50, sim: false, simSpeed: 30,
+};
+let S = Object.assign({}, DEFAULTS);
+try { Object.assign(S, JSON.parse(localStorage.getItem(LS_SET) || '{}')); } catch (e) {}
+const saveSettings = () => { try { localStorage.setItem(LS_SET, JSON.stringify(S)); } catch (e) {} };
+
+// ----- Nhật ký -----
+function log(msg) {
+  const el = $('log');
+  const line = document.createElement('div');
+  line.textContent = `${hhmm(new Date())}:${pad(new Date().getSeconds())} ${msg}`;
+  el.appendChild(line);
+  while (el.childNodes.length > 80) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+  console.log('[ESL]', msg);
+}
+
+function withTimeout(promise, ms, msg) {
+  let t;
+  return Promise.race([promise, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(msg || 'Quá thời gian')), ms); })])
+    .finally(() => clearTimeout(t));
+}
+
+async function fetchJson(url, ms = 15000) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ac.signal, headers: { 'Accept': 'application/json' } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+/* ====================================================================
+ *  Địa lý
+ * ==================================================================== */
+const R_EARTH = 6371008.8;
+function hav(a, b) {
+  const k = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * k, dLon = (b.lon - a.lon) * k;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * k) * Math.cos(b.lat * k) * Math.sin(dLon / 2) ** 2;
+  return 2 * R_EARTH * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+function makeRoute(pts, duration, source) {
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + hav(pts[i - 1], pts[i]));
+  return { pts, cum, total: cum[cum.length - 1], duration, source, lastIdx: 0 };
+}
+
+// Chiếu vị trí lên tuyến: khoảng cách lệch tuyến và quãng còn lại theo tuyến
+function projectOnRoute(route, p) {
+  const pts = route.pts, cum = route.cum;
+  if (pts.length < 2) return { off: hav(p, pts[0]), along: 0, remaining: hav(p, pts[0]) };
+  const kx = Math.cos(p.lat * Math.PI / 180) * 111320, ky = 110540;
+  let best = null, fwd = null;
+  const from = Math.max(0, (route.lastIdx || 0) - 10);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const ax = (a.lon - p.lon) * kx, ay = (a.lat - p.lat) * ky;
+    const dx = (b.lon - p.lon) * kx - ax, dy = (b.lat - p.lat) * ky - ay;
+    const L2 = dx * dx + dy * dy;
+    let t = L2 > 0 ? -(ax * dx + ay * dy) / L2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(ax + t * dx, ay + t * dy);
+    if (!best || d < best.d) best = { d, i, t };
+    if (i >= from && (!fwd || d < fwd.d)) fwd = { d, i, t };
+  }
+  const pick = (fwd && fwd.d <= best.d + 25) ? fwd : best;   // ưu tiên tiến về phía trước
+  route.lastIdx = pick.i;
+  const along = cum[pick.i] + pick.t * (cum[pick.i + 1] - cum[pick.i]);
+  return { off: pick.d, along, remaining: Math.max(0, route.total - along) };
+}
+
+function pointAlong(route, s) {
+  const cum = route.cum, pts = route.pts;
+  if (s <= 0) return { ...pts[0] };
+  if (s >= route.total) return { ...pts[pts.length - 1] };
+  let lo = 0, hi = cum.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; }
+  const seg = cum[hi] - cum[lo], t = seg > 0 ? (s - cum[lo]) / seg : 0;
+  return { lat: pts[lo].lat + (pts[hi].lat - pts[lo].lat) * t, lon: pts[lo].lon + (pts[hi].lon - pts[lo].lon) * t };
+}
+
+const SPEED_GUESS = { car: 30 / 3.6, bike: 15 / 3.6, foot: 4.5 / 3.6 };
+
+async function fetchRoute(from, to, profile) {
+  const c = `${from.lon.toFixed(6)},${from.lat.toFixed(6)};${to.lon.toFixed(6)},${to.lat.toFixed(6)}`;
+  const q = '?overview=full&geometries=geojson&steps=false';
+  const urls = [`https://routing.openstreetmap.de/routed-${profile}/route/v1/driving/${c}${q}`];
+  if (profile === 'car') urls.push(`https://router.project-osrm.org/route/v1/driving/${c}${q}`);
+  for (const u of urls) {
+    try {
+      const j = await fetchJson(u, 15000);
+      if (j.code === 'Ok' && j.routes && j.routes.length) {
+        const r = j.routes[0];
+        const pts = r.geometry.coordinates.map(([lon, lat]) => ({ lat, lon }));
+        return makeRoute(pts, r.duration, 'osrm');
+      }
+      log(`Tuyến: ${j.code || 'không có kết quả'}`);
+    } catch (e) { log(`Lỗi lấy tuyến (${new URL(u).host}): ${e.message}`); }
+  }
+  log('Không lấy được tuyến đường — dùng khoảng cách đường chim bay.');
+  const d = hav(from, to);
+  return makeRoute([{ ...from }, { ...to }], d / SPEED_GUESS[profile], 'line');
+}
+
+/* ====================================================================
+ *  Thời tiết (Open-Meteo, không cần khoá API)
+ * ==================================================================== */
+function wmo(code, isDay) {
+  if (code === 0) return { t: 'Trời quang', i: isDay ? 'sun' : 'moon' };
+  if (code === 1 || code === 2) return { t: 'Ít mây', i: isDay ? 'partly' : 'moon' };
+  if (code === 3) return { t: 'Nhiều mây', i: 'cloud' };
+  if (code === 45 || code === 48) return { t: 'Sương mù', i: 'fog' };
+  if (code >= 51 && code <= 57) return { t: 'Mưa phùn', i: 'rain' };
+  if (code >= 61 && code <= 67) return { t: code >= 65 ? 'Mưa to' : 'Mưa', i: 'rain' };
+  if (code >= 71 && code <= 77) return { t: 'Tuyết', i: 'snow' };
+  if (code >= 80 && code <= 82) return { t: 'Mưa rào', i: 'rain' };
+  if (code >= 85 && code <= 86) return { t: 'Mưa tuyết', i: 'snow' };
+  if (code >= 95) return { t: 'Dông', i: 'storm' };
+  return { t: '—', i: 'cloud' };
+}
+const isRainCode = (c) => (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
+
+let weather = null;
+async function refreshWeather(force = false) {
+  const p = pos || null;
+  if (!p) return;
+  if (!force && weather && Date.now() - weather.at < 10 * 60000 && hav(weather, p) < 5000) return;
+  const lats = [p.lat], lons = [p.lon];
+  if (dest) { lats.push(dest.lat); lons.push(dest.lon); }
+  const url = 'https://api.open-meteo.com/v1/forecast'
+    + `?latitude=${lats.map(v => v.toFixed(4)).join(',')}&longitude=${lons.map(v => v.toFixed(4)).join(',')}`
+    + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,is_day'
+    + '&hourly=precipitation_probability,weather_code,uv_index&forecast_hours=3'
+    + '&daily=sunset&forecast_days=1&timezone=auto';
+  try {
+    let j = await fetchJson(url, 12000);
+    j = Array.isArray(j) ? j : [j];
+    const a = j[0], c = a.current, h = a.hourly || {};
+    const probs = (h.precipitation_probability || []).filter(v => v != null);
+    const nextProbs = probs.length > 1 ? probs.slice(1) : probs;
+    const codes = h.weather_code || [];
+    const w = wmo(c.weather_code, !!c.is_day);
+    weather = {
+      at: Date.now(), lat: p.lat, lon: p.lon,
+      temp: c.temperature_2m, feels: c.apparent_temperature, hum: c.relative_humidity_2m, wind: c.wind_speed_10m,
+      code: c.weather_code, isDay: !!c.is_day, desc: w.t, icon: w.i,
+      rainNow: (c.precipitation || 0) > 0.1 || isRainCode(c.weather_code),
+      rainProb: nextProbs.length ? Math.max(...nextProbs) : 0,
+      stormSoon: c.weather_code >= 95 || codes.slice(0, 3).some(v => v >= 95),
+      uv: (h.uv_index || [0])[0] || 0,
+      sunset: a.daily && a.daily.sunset && a.daily.sunset[0] ? new Date(a.daily.sunset[0]) : null,
+    };
+    if (j[1] && j[1].current) {
+      const d = j[1].current, dp = ((j[1].hourly || {}).precipitation_probability || []).filter(v => v != null);
+      weather.destTemp = d.temperature_2m;
+      weather.destDesc = wmo(d.weather_code, !!d.is_day).t;
+      weather.destProb = dp.length ? Math.max(...dp) : 0;
+      weather.destRain = isRainCode(d.weather_code) || weather.destProb >= 50;
+    }
+    log(`Thời tiết: ${weather.desc} ${Math.round(weather.temp)}°C, mưa ${weather.rainProb}%`);
+  } catch (e) { log(`Lỗi thời tiết: ${e.message}`); }
+}
+
+/* ====================================================================
+ *  Bluetooth — giao thức EPD-nRF5
+ *  Service 62750001-…, ký tự ghi 62750002-…, phiên bản 62750003-…
+ *  0x01 INIT · 0x05 REFRESH · 0x20 SET_TIME · 0x30 WRITE_IMG
+ * ==================================================================== */
+const SVC = '62750001-d828-918d-fb46-b6c11c675aec';
+const CHR = '62750002-d828-918d-fb46-b6c11c675aec';
+const VERC = '62750003-d828-918d-fb46-b6c11c675aec';
+
+// RLE tương thích bộ giải nén của firmware:
+//   byte điều khiển ≥0x80: lặp (c&0x7F)+3 lần byte kế tiếp; <0x80: c+1 byte nguyên văn theo sau
+function rleEncode(data, maxLit) {
+  const codes = [];
+  const n = data.length;
+  let i = 0;
+  while (i < n) {
+    let run = 1;
+    while (i + run < n && run < 130 && data[i + run] === data[i]) run++;
+    if (run >= 3) { codes.push([0x80 | (run - 3), data[i]]); i += run; continue; }
+    const start = i;
+    while (i < n && i - start < maxLit) {
+      if (i + 2 < n && data[i] === data[i + 1] && data[i] === data[i + 2]) break;
+      i++;
+    }
+    const lit = [i - start - 1];
+    for (let k = start; k < i; k++) lit.push(data[k]);
+    codes.push(lit);
+  }
+  return codes;
+}
+// Ghép mã RLE thành gói ≤ maxChunk, không cắt ngang một mã (firmware giải nén từng gói độc lập)
+function rleChunks(data, maxChunk) {
+  const codes = rleEncode(data, Math.min(maxChunk - 1, 128));
+  const chunks = [];
+  let cur = [];
+  for (const c of codes) {
+    if (cur.length + c.length > maxChunk && cur.length) { chunks.push(Uint8Array.from(cur)); cur = []; }
+    cur.push(...c);
+  }
+  if (cur.length) chunks.push(Uint8Array.from(cur));
+  return chunks;
+}
+
+const esl = {
+  device: null, server: null, ch: null,
+  mtu: 20, rle: false, version: null, cfg: null, notifCount: 0, mtuWaiter: null, busy: false,
+  get connected() { return !!(this.server && this.server.connected && this.ch); },
+  get name() { return this.device ? (this.device.name || 'Nhãn') : ''; },
+
+  async pick() {
+    const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] });
+    if (this.device && this.device !== dev) this.disconnect();
+    if (this.device !== dev) {
+      dev.addEventListener('gattserverdisconnected', () => {
+        this.server = null; this.ch = null; uiBle(); log('Nhãn đã ngắt kết nối.');
+      });
+    }
+    this.device = dev;
+    await this.connect();
+  },
+
+  async connect() {
+    if (!this.device) throw new Error('Chưa chọn nhãn');
+    if (this.connected) return;
+    uiBle('Đang kết nối…');
+    let lastErr;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        this.server = await withTimeout(this.device.gatt.connect(), 15000, 'Kết nối quá hạn');
+        const svc = await this.server.getPrimaryService(SVC);
+        const ch = await svc.getCharacteristic(CHR);
+        try { this.version = (await (await svc.getCharacteristic(VERC)).readValue()).getUint8(0); } catch (e) { this.version = null; }
+        if (this.ch && this.ch !== ch) this.ch.removeEventListener('characteristicvaluechanged', onNotify);
+        ch.removeEventListener('characteristicvaluechanged', onNotify);
+        ch.addEventListener('characteristicvaluechanged', onNotify);
+        this.ch = ch;
+        this.notifCount = 0; this.rle = false; this.mtu = 20;
+        try { await ch.startNotifications(); } catch (e) { log(`Không bật được notify: ${e.message}`); }
+        log(`Đã kết nối ${this.name}` + (this.version != null ? `, firmware 0x${this.version.toString(16)}` : ''));
+        if (this.version != null && this.version < 0x16) log('Cảnh báo: firmware cũ (<1.6) có thể chưa hỗ trợ lệnh gửi ảnh 0x30.');
+        await this.init();
+        uiBle();
+        return;
+      } catch (e) {
+        lastErr = e;
+        log(`Kết nối lần ${attempt} lỗi: ${e.message}`);
+        try { this.device.gatt.disconnect(); } catch (_) {}
+        this.server = null; this.ch = null;
+        await sleep(attempt * 1500);
+      }
+    }
+    uiBle();
+    throw lastErr;
+  },
+
+  disconnect() { try { if (this.device && this.device.gatt.connected) this.device.gatt.disconnect(); } catch (e) {} },
+
+  async write(bytes, withResponse = true) {
+    if (!this.ch) throw new Error('Mất kết nối nhãn');
+    if (withResponse) await this.ch.writeValueWithResponse(bytes);
+    else await this.ch.writeValueWithoutResponse(bytes);
+  },
+
+  // INIT: nhãn khởi tạo driver màn và báo lại "mtu=… rle=1"
+  async init() {
+    const p = new Promise(r => { this.mtuWaiter = r; setTimeout(r, 1500); });
+    await this.write(Uint8Array.of(0x01));
+    await p;
+    this.mtuWaiter = null;
+  },
+
+  effMtu() { return S.mtuOverride > 0 ? S.mtuOverride : this.mtu; },
+
+  async writePlane(data, isRed) {
+    const chunk = Math.max(3, this.effMtu() - 2);
+    let packets = null, useRle = false;
+    if (this.rle) {
+      const c = rleChunks(data, chunk);
+      if (c.reduce((a, x) => a + x.length, 0) < data.length) { packets = c; useRle = true; }
+    }
+    if (!packets) {
+      packets = [];
+      for (let o = 0; o < data.length; o += chunk) packets.push(data.subarray(o, o + chunk));
+    }
+    let noReply = S.interleave;
+    for (let i = 0; i < packets.length; i++) {
+      // Firmware mới (báo rle=1): bit0 = lớp đỏ, bit1 = gói đầu, bit2 = nén RLE
+      // Firmware cũ: 0x0F = lớp đen / 0x00 = lớp đỏ, nibble cao 0xF_ = gói tiếp theo
+      const cfg = this.rle
+        ? ((isRed ? 0x01 : 0) | (i === 0 ? 0x02 : 0) | (useRle ? 0x04 : 0))
+        : ((isRed ? 0x00 : 0x0F) | (i === 0 ? 0x00 : 0xF0));
+      const pkt = new Uint8Array(2 + packets[i].length);
+      pkt[0] = 0x30; pkt[1] = cfg; pkt.set(packets[i], 2);
+      if (noReply > 0) { await this.write(pkt, false); noReply--; }
+      else { await this.write(pkt, true); noReply = S.interleave; }
+    }
+    return { packets: packets.length, bytes: packets.reduce((a, x) => a + x.length, 0), rle: useRle };
+  },
+
+  async sendPlanes(planes) {
+    if (this.busy) throw new Error('Nhãn đang bận');
+    this.busy = true;
+    try {
+      if (!this.connected) await this.connect();
+      else await this.init();
+      const t0 = Date.now();
+      const a = await this.writePlane(planes.bw, false);
+      let b = null;
+      if (planes.red) b = await this.writePlane(planes.red, true);
+      await this.write(Uint8Array.of(0x05));      // REFRESH
+      log(`Đã gửi ảnh (${a.packets + (b ? b.packets : 0)} gói, ${a.bytes + (b ? b.bytes : 0)} byte${a.rle ? ', RLE' : ''}, MTU ${this.effMtu()}) trong ${((Date.now() - t0) / 1000).toFixed(1)}s. Màn đang làm mới ~15–20s.`);
+      if (!S.keepConnected) setTimeout(() => this.disconnect(), 2000);
+    } finally { this.busy = false; }
+  },
+
+  // 0x20 SET_TIME: [ts 4 byte big-endian, múi giờ (giờ), chế độ: 0 ảnh, 1 lịch, 2 đồng hồ]
+  async setTimeMode(mode) {
+    if (!this.connected) await this.connect();
+    const ts = Math.floor(Date.now() / 1000);
+    const tz = Math.round(-new Date().getTimezoneOffset() / 60);
+    await this.write(Uint8Array.of(0x20, (ts >>> 24) & 255, (ts >>> 16) & 255, (ts >>> 8) & 255, ts & 255, tz & 255, mode));
+    log(`Đã đồng bộ giờ, chuyển nhãn sang chế độ ${mode === 2 ? 'đồng hồ' : mode === 1 ? 'lịch' : 'ảnh'}.`);
+  },
+};
+
+function onNotify(ev) {
+  const dv = ev.target.value;
+  const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  const txt = new TextDecoder().decode(bytes);
+  if (txt.startsWith('mtu=')) {
+    const m = parseInt(txt.slice(4), 10);
+    if (m > 0) esl.mtu = m;
+    esl.rle = /rle=1/.test(txt);
+    log(`Nhãn báo: MTU ${esl.mtu}${esl.rle ? ', hỗ trợ RLE' : ''}`);
+    if (esl.mtuWaiter) esl.mtuWaiter();
+  } else if (txt.startsWith('t=')) {
+    // giờ trên nhãn — không dùng
+  } else if (esl.notifCount === 0 && bytes.length >= 8) {
+    esl.cfg = bytes;
+    const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+    log(`Cấu hình nhãn: ${hex} (model 0x${bytes[7].toString(16)})`);
+    if (bytes.length > 8 && bytes[8] !== 0xFF && !S.keepConnected)
+      log('Lưu ý: nhãn có chân đánh thức — nếu ngắt kết nối ở chế độ ảnh, nhãn có thể ngủ sau 2 phút. Nên bật “Giữ kết nối”.');
+  } else {
+    log(`Nhãn: ${txt}`);
+  }
+  esl.notifCount++;
+}
+
+/* ====================================================================
+ *  Vẽ ảnh cho nhãn (250×128, nội dung trong 122 hàng nhìn thấy)
+ * ==================================================================== */
+const work = document.createElement('canvas');
+work.width = W; work.height = H;
+const wctx = work.getContext('2d', { willReadFrequently: true });
+
+function drawOffset() {
+  const spare = H - VIS_H;
+  const off = Math.max(0, Math.min(spare, S.topOffset | 0));
+  return S.flip ? spare - off : off;
+}
+
+function fmtDist(m) {
+  if (m == null || !isFinite(m)) return { v: '--', u: 'km' };
+  if (m < 1000) return { v: String(Math.round(m / 10) * 10), u: 'm' };
+  const km = m / 1000;
+  return { v: (km < 100 ? km.toFixed(1) : String(Math.round(km))).replace('.', ','), u: 'km' };
+}
+const fmtDistStr = (m) => { const f = fmtDist(m); return `${f.v} ${f.u}`; };
+function fmtDur(s) {
+  if (s == null || !isFinite(s)) return '--';
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h${pad(m)}` : `${m}'`;
+}
+const fmtSpeed = (ms) => (ms == null || !isFinite(ms)) ? '--' : (ms * 3.6).toFixed(ms * 3.6 < 100 ? 1 : 0).replace('.', ',');
+
+function fitText(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+
+// Biểu tượng thời tiết vẽ bằng nét đơn giản, hợp màn 1-bit
+function drawIcon(ctx, kind, x, y, s, fg, bg) {
+  const cx = x + s / 2, cy = y + s / 2;
+  ctx.save();
+  ctx.fillStyle = fg; ctx.strokeStyle = fg; ctx.lineWidth = Math.max(1.5, s / 10); ctx.lineCap = 'round';
+  const cloud = (ox, oy, sc) => {
+    ctx.beginPath();
+    ctx.arc(ox + sc * 0.30, oy + sc * 0.62, sc * 0.20, 0, Math.PI * 2);
+    ctx.arc(ox + sc * 0.52, oy + sc * 0.48, sc * 0.26, 0, Math.PI * 2);
+    ctx.arc(ox + sc * 0.74, oy + sc * 0.64, sc * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(ox + sc * 0.30, oy + sc * 0.62, sc * 0.44, sc * 0.20);
+  };
+  const sun = (ox, oy, sc) => {
+    const c = ox + sc / 2, d = oy + sc / 2;
+    ctx.beginPath(); ctx.arc(c, d, sc * 0.22, 0, Math.PI * 2); ctx.fill();
+    for (let k = 0; k < 8; k++) {
+      const a = k * Math.PI / 4;
+      ctx.beginPath();
+      ctx.moveTo(c + Math.cos(a) * sc * 0.33, d + Math.sin(a) * sc * 0.33);
+      ctx.lineTo(c + Math.cos(a) * sc * 0.47, d + Math.sin(a) * sc * 0.47);
+      ctx.stroke();
+    }
+  };
+  if (kind === 'sun') sun(x, y, s);
+  else if (kind === 'moon') {
+    ctx.beginPath(); ctx.arc(cx, cy, s * 0.38, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(cx + s * 0.2, cy - s * 0.12, s * 0.32, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'partly') {
+    sun(x - s * 0.12, y - s * 0.12, s * 0.8);
+    ctx.fillStyle = bg; ctx.beginPath();
+    ctx.arc(x + s * 0.55, y + s * 0.6, s * 0.36, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = fg; cloud(x + s * 0.1, y + s * 0.18, s * 0.9);
+  } else if (kind === 'cloud') cloud(x, y, s);
+  else if (kind === 'fog') {
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(x + s * 0.12, y + s * (0.3 + k * 0.22)); ctx.lineTo(x + s * 0.88, y + s * (0.3 + k * 0.22)); ctx.stroke(); }
+  } else if (kind === 'rain' || kind === 'snow' || kind === 'storm') {
+    cloud(x, y - s * 0.22, s);
+    if (kind === 'rain') {
+      for (let k = 0; k < 3; k++) { ctx.beginPath(); const rx = x + s * (0.32 + k * 0.2); ctx.moveTo(rx, y + s * 0.70); ctx.lineTo(rx - s * 0.08, y + s * 0.95); ctx.stroke(); }
+    } else if (kind === 'snow') {
+      for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(x + s * (0.3 + k * 0.2), y + s * 0.84, s * 0.06, 0, Math.PI * 2); ctx.fill(); }
+    } else {
+      ctx.beginPath(); ctx.moveTo(x + s * 0.55, y + s * 0.58); ctx.lineTo(x + s * 0.38, y + s * 0.82); ctx.lineTo(x + s * 0.52, y + s * 0.82);
+      ctx.lineTo(x + s * 0.42, y + s * 1.0); ctx.lineTo(x + s * 0.68, y + s * 0.74); ctx.lineTo(x + s * 0.54, y + s * 0.74); ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function drawWarn(ctx, x, yBase) {          // tam giác cảnh báo đỏ 11px
+  ctx.save();
+  ctx.fillStyle = '#f00';
+  ctx.beginPath(); ctx.moveTo(x + 5.5, yBase - 10); ctx.lineTo(x + 11, yBase); ctx.lineTo(x, yBase); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillRect(x + 5, yBase - 7, 1.5, 4); ctx.fillRect(x + 5, yBase - 2, 1.5, 1.5);
+  ctx.restore();
+}
+
+function drawClockIcon(ctx, x, yBase, color) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(x + 5, yBase - 4.5, 4.5, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 5, yBase - 7); ctx.lineTo(x + 5, yBase - 4.5); ctx.lineTo(x + 7, yBase - 3.5); ctx.stroke();
+  ctx.restore();
+}
+
+function drawHeader(ctx, D, title, arrow) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, 20);
+  ctx.fillStyle = '#fff'; ctx.font = `bold 17px ${FF}`;
+  const tStr = hhmm(D.now);
+  ctx.fillText(tStr, 3, 16);
+  const leftEnd = 3 + ctx.measureText(tStr).width + 6;
+  let right = W - 3;
+  if (D.weather) {
+    ctx.font = `bold 15px ${FF}`;
+    const t = `${Math.round(D.weather.temp)}°`;
+    const tw = ctx.measureText(t).width;
+    ctx.fillText(t, right - tw, 16);
+    right -= tw + 3;
+    drawIcon(ctx, D.weather.icon, right - 16, 2, 16, '#fff', '#000');
+    right -= 20;
+  }
+  ctx.font = `bold 11px ${FF}`;
+  let tx = leftEnd;
+  if (title && arrow) {                       // mũi tên tự vẽ (font Roboto không có ký tự →)
+    ctx.fillRect(tx, 9, 6, 2);
+    ctx.beginPath(); ctx.moveTo(tx + 5, 5.5); ctx.lineTo(tx + 9.5, 10); ctx.lineTo(tx + 5, 14.5); ctx.closePath(); ctx.fill();
+    tx += 13;
+  }
+  if (title) ctx.fillText(fitText(ctx, title, right - tx), tx, 14);
+}
+
+function bigValue(ctx, f, x, yBase, maxW, color) {
+  let size = 28;
+  ctx.fillStyle = color;
+  while (size > 16) {
+    ctx.font = `bold ${size}px ${FF}`;
+    const vw = ctx.measureText(f.v).width;
+    ctx.font = `bold 12px ${FF}`;
+    if (vw + 3 + ctx.measureText(f.u).width <= maxW) break;
+    size -= 2;
+  }
+  ctx.font = `bold ${size}px ${FF}`;
+  ctx.fillText(f.v, x, yBase);
+  const vw = ctx.measureText(f.v).width;
+  ctx.font = `bold 12px ${FF}`;
+  ctx.fillText(f.u, x + vw + 3, yBase);
+}
+
+function drawTip(ctx, tip, yBase) {
+  if (!tip) return;
+  let x = 4;
+  if (tip.warn) { drawWarn(ctx, x, yBase); x += 15; }
+  ctx.fillStyle = tip.warn ? '#f00' : '#000';
+  ctx.font = `bold 12px ${FF}`;
+  ctx.fillText(fitText(ctx, tip.text, W - 4 - x), x, yBase);
+}
+
+function drawTrip(ctx, D) {
+  ctx.save();
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.translate(0, drawOffset());
+  ctx.textBaseline = 'alphabetic';
+
+  drawHeader(ctx, D, D.destName, true);
+
+  // Hai số lớn
+  ctx.font = `bold 10px ${FF}`;
+  ctx.fillStyle = '#000'; ctx.fillText('ĐÃ ĐI', 4, 32);
+  ctx.fillStyle = '#f00'; ctx.fillText('CÒN LẠI', 131, 32);
+  bigValue(ctx, fmtDist(D.traveled), 4, 57, 118, '#000');
+  bigValue(ctx, fmtDist(D.remaining), 131, 57, 115, '#000');
+  ctx.fillStyle = '#000'; ctx.fillRect(125, 24, 1, 34);
+
+  // Thanh tiến độ
+  const bx = 4, by = 61, bw = W - 8, bh = 8;
+  ctx.fillStyle = '#000'; ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = '#fff'; ctx.fillRect(bx + 1, by + 1, bw - 2, bh - 2);
+  const ratio = Math.max(0, Math.min(1, D.progress || 0));
+  ctx.fillStyle = '#f00'; ctx.fillRect(bx + 2, by + 2, Math.round((bw - 4) * ratio), bh - 4);
+
+  // Hàng thông tin: TB · giờ đến · thời gian đã đi
+  ctx.fillStyle = '#000'; ctx.font = `bold 12px ${FF}`;
+  ctx.fillText(`TB ${fmtSpeed(D.avg)} km/h`, 4, 83);
+  const eta = D.etaDate ? `Đến ${hhmm(D.etaDate)}` : 'Đến --:--';
+  const ew = ctx.measureText(eta).width;
+  ctx.fillText(eta, 150 - ew / 2, 83);
+  const el = fmtDur(D.elapsed);
+  const elw = ctx.measureText(el).width;
+  ctx.fillText(el, W - 4 - elw, 83);
+  drawClockIcon(ctx, W - 4 - elw - 13, 83, '#000');
+
+  ctx.fillRect(4, 88, W - 8, 1);
+
+  // Gợi ý
+  drawTip(ctx, D.tips[0], 103);
+  drawTip(ctx, D.tips[1], 118);
+  ctx.restore();
+}
+
+function drawSummary(ctx, D) {
+  ctx.save();
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.translate(0, drawOffset());
+  drawHeader(ctx, D, 'ĐÃ ĐẾN NƠI');
+  ctx.fillStyle = '#f00'; ctx.font = `bold 13px ${FF}`;
+  ctx.fillText(fitText(ctx, D.destName || 'Điểm đến', W - 8), 4, 37);
+  bigValue(ctx, fmtDist(D.traveled), 4, 66, 130, '#000');
+  ctx.font = `bold 26px ${FF}`; ctx.fillStyle = '#000';
+  const el = fmtDur(D.elapsed), ew = ctx.measureText(el).width;
+  ctx.fillText(el, W - 4 - ew, 66);
+  ctx.font = `bold 12px ${FF}`;
+  ctx.fillText(fitText(ctx, `TB ${fmtSpeed(D.avg)} km/h · Max ${fmtSpeed(D.maxSpeed)} km/h`, W - 8), 4, 84);
+  ctx.fillRect(4, 88, W - 8, 1);
+  ctx.fillText(fitText(ctx, `Xuất phát ${hhmm(new Date(D.startAt))} – đến ${hhmm(D.now)}`, W - 8), 4, 103);
+  const w = D.weather;
+  ctx.fillText(fitText(ctx, w ? `${w.desc}, ${Math.round(w.temp)}° · Nghỉ ngơi nhé!` : 'Nghỉ ngơi nhé!', W - 8), 4, 118);
+  ctx.restore();
+}
+
+function drawIdle(ctx, D) {
+  ctx.save();
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.translate(0, drawOffset());
+  drawHeader(ctx, D, D.destName || 'Chưa bắt đầu', !!D.destName);
+  ctx.fillStyle = '#000'; ctx.font = `bold 44px ${FF}`;
+  const t = hhmm(D.now), tw = ctx.measureText(t).width;
+  ctx.fillText(t, (W - tw) / 2, 70);
+  ctx.font = `bold 12px ${FF}`;
+  const days = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+  const ds = `${days[D.now.getDay()]}, ${pad(D.now.getDate())}/${pad(D.now.getMonth() + 1)}/${D.now.getFullYear()}`;
+  ctx.fillText(ds, (W - ctx.measureText(ds).width) / 2, 86);
+  ctx.fillRect(4, 90, W - 8, 1);
+  drawTip(ctx, D.tips[0] || { text: 'Chọn điểm đến trên điện thoại rồi bấm Bắt đầu', warn: false }, 105);
+  drawTip(ctx, D.tips[1], 119);
+  ctx.restore();
+}
+
+function drawTestPattern(ctx) {
+  ctx.save();
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  for (let x = 0; x < W; x += 2) { ctx.fillStyle = '#000'; ctx.fillRect(x, 0, 1, 6); ctx.fillStyle = '#f00'; ctx.fillRect(x, H - 6, 1, 6); }
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, 1); ctx.fillRect(0, H - 1, W, 1); ctx.fillRect(0, 0, 1, H); ctx.fillRect(W - 1, 0, 1, H);
+  ctx.fillStyle = '#f00';
+  ctx.beginPath(); ctx.moveTo(125, 10); ctx.lineTo(137, 26); ctx.lineTo(113, 26); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#000'; ctx.font = `bold 16px ${FF}`;
+  const c = (t, y) => ctx.fillText(t, (W - ctx.measureText(t).width) / 2, y);
+  c('TRÊN', 44);
+  ctx.font = `bold 14px ${FF}`;
+  ctx.fillText('TRÁI', 6, 70);
+  ctx.fillText('PHẢI', W - 6 - ctx.measureText('PHẢI').width, 70);
+  ctx.font = `bold 12px ${FF}`;
+  ctx.fillText('1', 4, 20); ctx.fillText('2', W - 12, 20); ctx.fillText('3', W - 12, H - 10); ctx.fillText('4', 4, H - 10);
+  c('dải đen = 6 hàng trên', 90);
+  ctx.fillStyle = '#f00'; c('dải đỏ = 6 hàng dưới', 108);
+  ctx.restore();
+}
+
+// Lượng tử về 3 màu: 0 trắng, 1 đen, 2 đỏ
+function quantize(ctx) {
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const q = new Uint8Array(W * H);
+  const thr = S.bwThreshold;
+  const bwOnly = S.colorMode === 'bw';
+  for (let p = 0, i = 0; p < W * H; p++, i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    if (r > 150 && r - Math.max(g, b) > 80) q[p] = bwOnly ? 1 : 2;
+    else q[p] = (0.299 * r + 0.587 * g + 0.114 * b) >= thr ? 0 : 1;
+  }
+  return q;
+}
+
+// Đóng gói thành 2 lớp bit theo bố cục bộ nhớ của nhãn
+//   lớp đen: 1 = trắng, 0 = đen · lớp đỏ: 0 = đỏ, 1 = không đỏ · mỗi hàng đệm đủ byte
+function packPlanes(q) {
+  const land = S.memLayout === 'land';
+  const bwW = land ? W : H, bwH = land ? H : W;
+  const bpr = Math.ceil(bwW / 8);
+  const bw = new Uint8Array(bpr * bwH).fill(0xFF);
+  const red = new Uint8Array(bpr * bwH).fill(0xFF);
+  for (let by = 0; by < bwH; by++) {
+    for (let bx = 0; bx < bwW; bx++) {
+      let x, y;
+      if (land) { x = bx; y = by; }
+      else if (S.memLayout === 'cw') { x = by; y = H - 1 - bx; }
+      else { x = W - 1 - by; y = bx; }
+      if (S.flip) { x = W - 1 - x; y = H - 1 - y; }
+      const c = q[y * W + x];
+      const idx = by * bpr + (bx >> 3), bit = 0x80 >> (bx & 7);
+      if (c === 1) bw[idx] &= ~bit;
+      else if (c === 2) red[idx] &= ~bit;
+    }
+  }
+  if (S.invertRed) for (let i = 0; i < red.length; i++) red[i] ^= 0xFF;
+  return { bw, red: S.colorMode === 'bw' ? null : red, w: bwW, h: bwH };
+}
+
+function showPreview(q) {
+  const pv = $('pv'), pc = pv.getContext('2d');
+  const img = pc.createImageData(W, H);
+  const off = drawOffset();
+  for (let p = 0; p < W * H; p++) {
+    const y = (p / W) | 0, x = p % W;
+    const hidden = y < off || y >= off + VIS_H;
+    let r = 255, g = 255, b = 255;
+    if (q[p] === 1) { r = g = b = 0; } else if (q[p] === 2) { r = 220; g = 20; b = 30; }
+    if (hidden && ((x + y) % 4 === 0)) { r = 150; g = 150; b = 150; }
+    else if (hidden && q[p] === 0) { r = g = b = 225; }
+    img.data[p * 4] = r; img.data[p * 4 + 1] = g; img.data[p * 4 + 2] = b; img.data[p * 4 + 3] = 255;
+  }
+  pc.putImageData(img, 0, 0);
+}
+
+/* ====================================================================
+ *  Chuyến đi
+ * ==================================================================== */
+let pos = null, dest = null, route = null, battery = null;
+const T = {
+  active: false, arrived: false, startAt: 0, traveled: 0, moving: 0, maxSpeed: 0, speedNow: null,
+  lastAcc: null, rejects: 0, contMoveStart: null, lastMoveAt: 0, offRoute: 0, offSince: null,
+  lastRerouteAt: 0, remaining: null, track: [],
+};
+let nextSendAt = 0, sending = false, lastSentAt = 0;
+
+function collect() {
+  const now = new Date();
+  const elapsed = T.active || T.arrived ? (now - T.startAt) / 1000 : 0;
+  const avg = elapsed >= 60 ? T.traveled / elapsed : null;
+  let remaining = T.remaining;
+  if (remaining == null && pos && dest) remaining = route ? projectOnRoute(route, pos).remaining : hav(pos, dest);
+  let etaSec = null;
+  if (remaining != null) {
+    if (elapsed > 180 && avg > 1) etaSec = remaining / avg;
+    else if (route && route.total > 0 && route.duration > 0) etaSec = remaining * (route.duration / route.total);
+  }
+  const progress = (remaining != null && T.traveled + remaining > 0) ? T.traveled / (T.traveled + remaining) : 0;
+  const contMove = (T.contMoveStart && Date.now() - T.lastMoveAt < 5 * 60000) ? (Date.now() - T.contMoveStart) / 1000 : 0;
+  const D = {
+    now, elapsed, avg, remaining, progress, traveled: T.traveled, speedNow: T.speedNow, maxSpeed: T.maxSpeed,
+    etaDate: etaSec != null ? new Date(now.getTime() + etaSec * 1000) : null, startAt: T.startAt,
+    destName: dest ? shortName(dest) : '', weather, battery, offRoute: T.offRoute, contMove, arrived: T.arrived,
+  };
+  D.tips = buildTips(D);
+  return D;
+}
+
+function shortName(d) {
+  return d.name || `${d.lat.toFixed(4)}, ${d.lon.toFixed(4)}`;
+}
+
+// Gợi ý: xếp theo mức ưu tiên, nhãn hiện 2 dòng đầu
+function buildTips(D) {
+  const tips = [];
+  const add = (pri, text, warn) => tips.push({ pri, text, warn: !!warn });
+  const w = D.weather;
+  if (T.active && D.remaining != null && D.remaining < 1000) add(100, `Sắp đến! Còn ${fmtDistStr(D.remaining)}`, true);
+  if (w) {
+    if (w.stormSoon) add(95, 'Có dông – tìm chỗ trú an toàn', true);
+    if (w.rainNow) add(90, 'Đang mưa – đi chậm, giữ khoảng cách', true);
+    else if (w.rainProb >= 50) add(85, `Mưa ${w.rainProb}% trong 2h tới – mang áo mưa`, true);
+    if (w.feels >= 35) add(70, `Nóng ${Math.round(w.feels)}° – uống nước, nghỉ chỗ râm`, true);
+    if (w.wind >= 40) add(68, `Gió mạnh ${Math.round(w.wind)} km/h – giữ chắc tay lái`, true);
+    if (w.destRain && !w.rainNow && w.rainProb < 50) add(62, `Điểm đến có thể mưa (${w.destProb}%)`, false);
+    if (w.isDay && w.uv >= 8) add(55, `UV ${Math.round(w.uv)} rất cao – che chắn da`, false);
+    if (D.etaDate && w.sunset && Date.now() < w.sunset && D.etaDate > w.sunset) add(52, `Đến sau hoàng hôn (${hhmm(w.sunset)}) – bật đèn`, false);
+  }
+  if (D.contMove >= 2 * 3600) add(80, `Đã chạy ${fmtDur(D.contMove)} liền – nghỉ 15 phút nhé`, true);
+  if (T.active && D.offRoute > 150) add(75, `Lệch tuyến ${Math.round(D.offRoute)} m – đang tính lại`, true);
+  if (D.battery && !D.battery.charging && D.battery.level <= 0.2) add(72, `Pin điện thoại ${Math.round(D.battery.level * 100)}% – cắm sạc`, true);
+  if (w && w.destTemp != null) add(30, `Điểm đến: ${Math.round(w.destTemp)}°, ${w.destDesc.toLowerCase()}`, false);
+  if (w) add(25, `${w.desc} · ẩm ${Math.round(w.hum)}% · gió ${Math.round(w.wind)} km/h`, false);
+  if (T.active && D.speedNow != null) add(20, `Tốc độ hiện tại ${Math.round(D.speedNow * 3.6)} km/h`, false);
+  tips.sort((a, b) => b.pri - a.pri);
+  return tips;
+}
+
+function onFix(p) {
+  pos = p;
+  try { localStorage.setItem(LS_POS, JSON.stringify({ lat: p.lat, lon: p.lon })); } catch (e) {}
+  uiGps();
+  updateMeMarker();
+  if (dest && !route && !routing) computeRoute();
+  if (!T.active || T.arrived) return;
+
+  if (p.speed != null && p.speed >= 0) T.speedNow = p.speed;
+  if (p.acc <= 60) {
+    const last = T.lastAcc;
+    if (!last) { T.lastAcc = p; }
+    else {
+      const d = hav(last, p), dt = (p.t - last.t) / 1000;
+      if (dt > 0) {
+        const v = d / dt;
+        const thr = Math.min(25, Math.max(4, Math.max(p.acc, last.acc) * 0.5));   // lọc rung GPS
+        if (v > 70 && T.rejects < 5) { T.rejects++; }
+        else if (d >= thr) {
+          T.rejects = 0;
+          T.traveled += d;
+          if (p.speed == null) T.speedNow = v;
+          if (v > 0.8) {
+            T.moving += dt;
+            if (!T.contMoveStart || p.t - T.lastMoveAt > 5 * 60000) T.contMoveStart = p.t;
+            T.lastMoveAt = p.t;
+          }
+          T.maxSpeed = Math.max(T.maxSpeed, Math.min(v, 70), p.speed || 0);
+          T.lastAcc = p;
+          T.track.push([p.lat, p.lon]);
+          if (T.track.length > 4000) T.track.splice(0, 1000);
+          if (trackLine) trackLine.addLatLng([p.lat, p.lon]);
+        } else if (dt > 20 && p.speed == null) { T.speedNow = 0; }
+      }
+    }
+  }
+
+  if (route) {
+    const pr = projectOnRoute(route, p);
+    T.offRoute = pr.off;
+    T.remaining = pr.remaining + (pr.off > 30 ? pr.off : 0);
+    if (pr.off > 80) {
+      if (!T.offSince) T.offSince = Date.now();
+      if (Date.now() - T.offSince > 20000 && Date.now() - T.lastRerouteAt > 60000 && !routing) {
+        T.lastRerouteAt = Date.now();
+        log(`Lệch tuyến ${Math.round(pr.off)} m — tính lại đường.`);
+        computeRoute();
+      }
+    } else T.offSince = null;
+  } else if (dest) {
+    T.remaining = hav(p, dest);
+  }
+
+  if (dest && (hav(p, dest) < 40 || (route && T.remaining != null && T.remaining < 30))) arrive();
+}
+
+async function arrive() {
+  if (T.arrived) return;
+  T.arrived = true; T.active = false; T.remaining = 0;
+  log('Đã đến nơi!');
+  uiTrip(); saveTrip();
+  try {
+    while (sending) await sleep(500);          // chờ lần gửi đang chạy xong
+    if (S.arriveAction === 'summary') await doUpdate('arrive');
+    else if (esl.device) await esl.setTimeMode(S.arriveAction === 'clock' ? 2 : 1);
+  } catch (e) { log(`Lỗi khi đến nơi: ${e.message}`); }
+  keepAwake(false);
+}
+
+function startTrip() {
+  if (!dest) { alert('Hãy chọn điểm đến trước.'); return; }
+  if (!pos) {
+    if (S.sim && map) { const c = map.getCenter(); onFix({ lat: c.lat, lon: c.lng, acc: 5, t: Date.now(), speed: 0 }); }
+    else { alert('Chưa có vị trí GPS. Hãy bật định vị và chờ một chút.'); return; }
+  }
+  Object.assign(T, {
+    active: true, arrived: false, startAt: Date.now(), traveled: 0, moving: 0, maxSpeed: 0, speedNow: null,
+    lastAcc: null, rejects: 0, contMoveStart: null, lastMoveAt: 0, offRoute: 0, offSince: null, remaining: null, track: [],
+  });
+  if (trackLine) trackLine.setLatLngs([]);
+  sim.along = 0;
+  if (route) { route.lastIdx = 0; const pr = projectOnRoute(route, pos); T.remaining = pr.remaining; if (S.sim) sim.along = pr.along; }
+  else computeRoute();
+  keepAwake(true);
+  log('Bắt đầu chuyến đi.');
+  uiTrip(); saveTrip();
+  nextSendAt = Date.now();           // gửi ảnh đầu tiên ngay
+}
+
+function stopTrip() {
+  T.active = false;
+  keepAwake(false);
+  log('Đã dừng chuyến đi.');
+  uiTrip(); saveTrip();
+}
+
+async function doUpdate(reason) {
+  if (sending) return;
+  if (Date.now() - lastSentAt < 25000 && reason === 'manual') { log('Vừa gửi xong, chờ màn làm mới (~25s).'); return; }
+  sending = true;
+  try {
+    await refreshWeather();
+    const D = collect();
+    if (T.arrived) drawSummary(wctx, D);
+    else if (T.active) drawTrip(wctx, D);
+    else drawIdle(wctx, D);
+    const q = quantize(wctx);
+    showPreview(q);
+    if (esl.device) {
+      await esl.sendPlanes(packPlanes(q));
+      lastSentAt = Date.now();
+      $('pvInfo').textContent = `đã gửi ${hhmm(new Date())}`;
+    } else if (reason !== 'auto-preview') {
+      log('Chưa kết nối nhãn — chỉ cập nhật bản xem trước.');
+    }
+    nextSendAt = Date.now() + S.intervalMin * 60000;
+  } catch (e) {
+    log(`Gửi lỗi: ${e.message} — thử lại sau 30s.`);
+    nextSendAt = Date.now() + 30000;
+  } finally {
+    sending = false;
+    uiBle();
+  }
+}
+
+function refreshPreviewOnly() {
+  if (sending) return;
+  const D = collect();
+  if (T.arrived) drawSummary(wctx, D); else if (T.active) drawTrip(wctx, D); else drawIdle(wctx, D);
+  showPreview(quantize(wctx));
+}
+
+// ----- Lưu / khôi phục chuyến (phòng khi trình duyệt tải lại trang) -----
+function saveTrip() {
+  try {
+    localStorage.setItem(LS_TRIP, JSON.stringify({
+      savedAt: Date.now(), dest, T: { ...T, track: T.track.slice(-1000) },
+      route: route ? { pts: route.pts, duration: route.duration, source: route.source } : null,
+    }));
+  } catch (e) {}
+}
+function restoreTrip() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_TRIP) || 'null');
+    if (!s) return;
+    if (s.dest) dest = s.dest;
+    if (s.route && s.route.pts && s.route.pts.length) route = makeRoute(s.route.pts, s.route.duration, s.route.source);
+    if (s.T && s.T.active && Date.now() - s.savedAt < 12 * 3600000) {
+      Object.assign(T, s.T);
+      const b = $('bannerResume');
+      b.textContent = `Đã khôi phục chuyến đi đang chạy (${fmtDistStr(T.traveled)}). Bấm “Kết nối nhãn” để tiếp tục gửi.`;
+      b.style.display = 'block';
+      keepAwake(true);
+      nextSendAt = Date.now() + 60000;
+    }
+  } catch (e) { log(`Không khôi phục được chuyến: ${e.message}`); }
+}
+
+// ----- Giữ màn hình sáng -----
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !wakeLock && document.visibilityState === 'visible') {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) { log(`Không giữ được màn hình sáng: ${e.message}`); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { if (T.active) keepAwake(true); tick(); }
+  else if (T.active) { log('Ứng dụng bị ẩn — Chrome có thể tạm dừng GPS và hẹn giờ.'); saveTrip(); }
+});
+
+// ----- Mô phỏng -----
+const sim = { along: 0 };
+setInterval(() => {
+  if (!S.sim || !T.active || !route) return;
+  sim.along = Math.min(route.total, sim.along + S.simSpeed / 3.6);
+  const p = pointAlong(route, sim.along);
+  onFix({ lat: p.lat, lon: p.lon, acc: 5, t: Date.now(), speed: S.simSpeed / 3.6 });
+}, 1000);
+
+/* ====================================================================
+ *  Bản đồ
+ * ==================================================================== */
+let map = null, meMarker = null, accCircle = null, destMarker = null, routeLine = null, trackLine = null, routing = false, follow = true;
+
+function initMap() {
+  if (!window.L) { $('map').innerHTML = '<div style="padding:20px;color:#ccc">Không tải được bản đồ (mất mạng?). Vẫn có thể gửi lên nhãn.</div>'; return; }
+  let center = [16.05, 108.2], zoom = 5;
+  try { const lp = JSON.parse(localStorage.getItem(LS_POS) || 'null'); if (lp) { center = [lp.lat, lp.lon]; zoom = 14; } } catch (e) {}
+  map = L.map('map', { zoomControl: true, attributionControl: true }).setView(center, zoom);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+  trackLine = L.polyline([], { color: '#3b82f6', weight: 5, opacity: .8 }).addTo(map);
+  map.on('dragstart', () => { follow = false; });
+  map.on('click', (e) => {
+    const p = { lat: e.latlng.lat, lon: e.latlng.lng };
+    if (T.active) {
+      const div = document.createElement('div');
+      const btn = document.createElement('button');
+      btn.textContent = 'Đổi điểm đến tới đây';
+      btn.onclick = () => { map.closePopup(); setDest(p); };
+      div.appendChild(btn);
+      L.popup().setLatLng(e.latlng).setContent(div).openOn(map);
+    } else setDest(p);
+  });
+  const Locate = L.Control.extend({
+    onAdd() {
+      const b = L.DomUtil.create('button');
+      b.textContent = '◎'; b.title = 'Về vị trí của tôi';
+      b.style.cssText = 'width:36px;height:36px;padding:0;font-size:20px;background:#fff;color:#111;border-radius:6px;border:2px solid rgba(0,0,0,.3)';
+      L.DomEvent.on(b, 'click', (ev) => { L.DomEvent.stop(ev); follow = true; if (pos) map.setView([pos.lat, pos.lon], Math.max(map.getZoom(), 15)); });
+      return b;
+    },
+  });
+  new Locate({ position: 'topright' }).addTo(map);
+}
+
+function updateMeMarker() {
+  if (!map || !pos) return;
+  const ll = [pos.lat, pos.lon];
+  if (!meMarker) {
+    meMarker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#3b82f6', fillOpacity: 1 }).addTo(map);
+    accCircle = L.circle(ll, { radius: pos.acc || 20, color: '#3b82f6', weight: 1, fillOpacity: .1 }).addTo(map);
+    map.setView(ll, Math.max(map.getZoom(), 15));
+  } else {
+    meMarker.setLatLng(ll); accCircle.setLatLng(ll); accCircle.setRadius(pos.acc || 20);
+    if (follow && T.active) map.panTo(ll, { animate: false });
+  }
+}
+
+async function setDest(p, name) {
+  dest = { lat: p.lat, lon: p.lon, name: name || null };
+  route = null;
+  if (map) {
+    if (destMarker) destMarker.setLatLng([p.lat, p.lon]);
+    else destMarker = L.marker([p.lat, p.lon]).addTo(map);
+  }
+  uiDest();
+  if (!name) reverseName(dest);
+  if (pos) await computeRoute(true);
+  saveTrip();
+}
+
+async function reverseName(d) {
+  try {
+    const j = await fetchJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}&zoom=17&accept-language=vi`, 10000);
+    const a = j.address || {};
+    const nm = j.name || [a.house_number, a.road].filter(Boolean).join(' ') || a.suburb || a.city || (j.display_name || '').split(',')[0];
+    if (nm && dest === d) { d.name = nm.trim(); uiDest(); saveTrip(); }
+  } catch (e) { log(`Không lấy được tên địa điểm: ${e.message}`); }
+}
+
+async function computeRoute(fit) {
+  if (!dest || !pos || routing) return;
+  routing = true;
+  $('routeInfo').textContent = 'Đang tìm đường…';
+  try {
+    const r = await fetchRoute(pos, dest, S.profile);
+    route = r;
+    T.offSince = null;
+    if (T.active) { const pr = projectOnRoute(route, pos); T.remaining = pr.remaining; if (S.sim) sim.along = pr.along; }
+    if (map) {
+      const ll = r.pts.map(q => [q.lat, q.lon]);
+      if (routeLine) routeLine.setLatLngs(ll);
+      else routeLine = L.polyline(ll, { color: '#e5484d', weight: 5, opacity: .85, dashArray: r.source === 'line' ? '6 8' : null }).addTo(map);
+      if (fit) map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+    }
+    uiDest();
+    saveTrip();
+    refreshWeather(true);
+  } finally { routing = false; }
+}
+
+async function search() {
+  const q = $('q').value.trim();
+  if (!q) return;
+  const ul = $('results');
+  ul.innerHTML = '<li class="mut">Đang tìm…</li>';
+  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=vi&q=${encodeURIComponent(q)}`;
+  if (pos) url += `&viewbox=${pos.lon - 1},${pos.lat + 1},${pos.lon + 1},${pos.lat - 1}`;
+  try {
+    const j = await fetchJson(url, 12000);
+    ul.innerHTML = '';
+    if (!j.length) { ul.innerHTML = '<li class="mut">Không tìm thấy.</li>'; return; }
+    for (const it of j) {
+      const li = document.createElement('li');
+      const parts = (it.display_name || '').split(',');
+      const nm = it.name || parts[0];
+      li.textContent = it.display_name;
+      if (pos) li.textContent += ` · ${fmtDistStr(hav(pos, { lat: +it.lat, lon: +it.lon }))}`;
+      li.onclick = () => {
+        ul.innerHTML = '';
+        $('q').value = nm;
+        setDest({ lat: +it.lat, lon: +it.lon }, nm.trim());
+      };
+      ul.appendChild(li);
+    }
+  } catch (e) { ul.innerHTML = `<li class="mut">Lỗi tìm kiếm: ${e.message}</li>`; }
+}
+
+/* ====================================================================
+ *  Giao diện
+ * ==================================================================== */
+function uiBle(text) {
+  const c = $('chipBle');
+  if (text) { c.textContent = `Nhãn: ${text}`; c.className = 'chip'; return; }
+  if (esl.connected) { c.textContent = `Nhãn: ${esl.name} ✓`; c.className = 'chip on'; $('btnBle').textContent = 'Ngắt nhãn'; }
+  else if (esl.device) { c.textContent = `Nhãn: ${esl.name} (tự nối lại khi gửi)`; c.className = 'chip warn'; $('btnBle').textContent = 'Kết nối lại'; }
+  else { c.textContent = 'Nhãn: chưa kết nối'; c.className = 'chip'; $('btnBle').textContent = 'Kết nối nhãn'; }
+}
+function uiGps(err) {
+  const c = $('chipGps');
+  if (err) { c.textContent = `GPS: ${err}`; c.className = 'chip warn'; return; }
+  if (pos) { c.textContent = S.sim && T.active ? 'GPS: mô phỏng' : `GPS: ±${Math.round(pos.acc)} m`; c.className = pos.acc <= 30 ? 'chip on' : 'chip warn'; }
+}
+function uiDest() {
+  $('destName').textContent = dest ? shortName(dest) : 'chưa chọn';
+  $('destName').className = dest ? '' : 'mut';
+  if (route) $('routeInfo').textContent = `${route.source === 'line' ? 'Đường chim bay' : 'Theo đường'}: ${fmtDistStr(route.total)} · ~${fmtDur(route.duration)}`;
+  else $('routeInfo').textContent = dest && !pos ? 'Chờ GPS để tìm đường…' : '';
+}
+function uiTrip() {
+  const b = $('btnTrip');
+  if (T.active) { b.textContent = 'Dừng'; b.className = 'ok'; }
+  else { b.textContent = T.arrived ? 'Đi tiếp' : 'Bắt đầu'; b.className = 'pri'; }
+}
+function uiStats() {
+  const D = collect();
+  $('sTrav').textContent = fmtDistStr(D.traveled);
+  $('sRem').textContent = D.remaining != null ? fmtDistStr(D.remaining) : '--';
+  $('sAvg').textContent = D.avg != null ? `${fmtSpeed(D.avg)}` : '--';
+  $('sNow').textContent = T.speedNow != null && T.active ? `${Math.round(T.speedNow * 3.6)}` : '--';
+  $('sEl').textContent = T.active || T.arrived ? fmtDur(D.elapsed) : '--';
+  $('sEta').textContent = D.etaDate ? hhmm(D.etaDate) : '--';
+  const w = weather;
+  $('wxLine').textContent = w ? `${w.desc}, ${Math.round(w.temp)}°C (cảm giác ${Math.round(w.feels)}°) · mưa ${w.rainProb}% · gió ${Math.round(w.wind)} km/h` + (w.destTemp != null ? ` · điểm đến ${Math.round(w.destTemp)}°` : '') : '';
+  const nc = $('chipNext');
+  if (T.active) {
+    const s = Math.max(0, Math.round((nextSendAt - Date.now()) / 1000));
+    nc.textContent = sending ? 'Đang gửi…' : `Gửi tiếp sau ${Math.floor(s / 60)}:${pad(s % 60)}`;
+    nc.className = 'chip on';
+  } else { nc.textContent = T.arrived ? 'Đã đến nơi' : 'Chưa chạy'; nc.className = 'chip'; }
+}
+
+let tickN = 0;
+function tick() {
+  uiStats();
+  if (T.active && !sending && Date.now() >= nextSendAt) doUpdate('auto');
+  if (++tickN % 15 === 0) { refreshPreviewOnly(); if (T.active) saveTrip(); }
+}
+
+function bindSettings() {
+  const ids = ['intervalMin', 'keepConnected', 'arriveAction', 'colorMode', 'memLayout', 'flip', 'topOffset', 'invertRed', 'bwThreshold', 'mtuOverride', 'interleave', 'sim', 'simSpeed', 'profile'];
+  for (const id of ids) {
+    const el = $(id);
+    if (el.type === 'checkbox') el.checked = !!S[id]; else el.value = S[id];
+    el.addEventListener('change', () => {
+      if (el.type === 'checkbox') S[id] = el.checked;
+      else if (el.type === 'number') { const v = parseFloat(el.value); S[id] = isFinite(v) ? v : DEFAULTS[id]; }
+      else S[id] = el.value;
+      if (id === 'intervalMin') { S.intervalMin = Math.max(1, Math.min(60, S.intervalMin)); if (T.active) nextSendAt = Math.min(nextSendAt, Date.now() + S.intervalMin * 60000); }
+      if (id === 'topOffset') S.topOffset = Math.max(0, Math.min(6, Math.round(S.topOffset)));
+      if (id === 'profile' && dest && pos) computeRoute(true);
+      saveSettings();
+      refreshPreviewOnly();
+    });
+  }
+}
+
+function checkSupport() {
+  const msgs = [];
+  if (!window.isSecureContext) msgs.push('Trang cần mở qua HTTPS (hoặc localhost) thì Bluetooth và GPS mới chạy.');
+  if (!navigator.bluetooth) msgs.push('Trình duyệt này không có Web Bluetooth. Dùng Chrome hoặc Edge trên Android (iPhone: trình duyệt Bluefy).');
+  if (msgs.length) { $('bannerSupport').innerHTML = msgs.join('<br>'); $('bannerSupport').style.display = 'block'; }
+}
+
+/* ====================================================================
+ *  Khởi động
+ * ==================================================================== */
+window.addEventListener('load', () => {
+  checkSupport();
+  initMap();
+  bindSettings();
+  restoreTrip();
+  if (map && dest) {
+    destMarker = L.marker([dest.lat, dest.lon]).addTo(map);
+    if (route) routeLine = L.polyline(route.pts.map(q => [q.lat, q.lon]), { color: '#e5484d', weight: 5, opacity: .85 }).addTo(map);
+    if (T.track && T.track.length) trackLine.setLatLngs(T.track);
+  }
+  uiDest(); uiTrip(); uiBle();
+
+  $('btnSearch').onclick = search;
+  $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') search(); });
+
+  $('btnBle').onclick = async () => {
+    try {
+      if (esl.connected) { esl.disconnect(); return; }
+      if (esl.device) await esl.connect();
+      else await esl.pick();
+      $('bannerResume').style.display = 'none';
+    } catch (e) { log(`Bluetooth: ${e.message}`); uiBle(); }
+  };
+  $('btnTrip').onclick = () => { if (T.active) stopTrip(); else startTrip(); };
+  $('btnSend').onclick = () => doUpdate('manual');
+  $('btnTest').onclick = async () => {
+    drawTestPattern(wctx);
+    const q = quantize(wctx);
+    showPreview(q);
+    if (!esl.device) { log('Chưa kết nối nhãn — chỉ hiện xem trước ảnh mẫu.'); return; }
+    try { await esl.sendPlanes(packPlanes(q)); lastSentAt = Date.now(); } catch (e) { log(`Gửi ảnh mẫu lỗi: ${e.message}`); }
+  };
+  $('btnClock').onclick = async () => {
+    if (!confirm('Chế độ đồng hồ của firmware làm mới toàn màn mỗi phút (tốn pin). Tiếp tục?')) return;
+    try { await esl.setTimeMode(2); } catch (e) { log(`Lỗi: ${e.message}`); }
+  };
+  $('btnCal').onclick = async () => { try { await esl.setTimeMode(1); } catch (e) { log(`Lỗi: ${e.message}`); } };
+
+  if ('geolocation' in navigator) {
+    navigator.geolocation.watchPosition(
+      (p) => {
+        if (S.sim && T.active) return;
+        onFix({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, t: p.timestamp || Date.now(), speed: p.coords.speed ?? null });
+      },
+      (err) => { log(`GPS: ${err.message}`); uiGps(err.code === 1 ? 'bị từ chối' : 'chưa có tín hiệu'); },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
+  } else uiGps('không hỗ trợ');
+
+  if (navigator.getBattery) navigator.getBattery().then(b => { battery = b; }).catch(() => {});
+
+  refreshPreviewOnly();
+  setInterval(tick, 1000);
+  log('Sẵn sàng. Chọn điểm đến, kết nối nhãn rồi bấm Bắt đầu.');
+});
+</script>
+</body>
+</html>
